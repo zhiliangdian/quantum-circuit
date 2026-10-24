@@ -3,3 +3,10 @@ completed most of the classes for elements(qubit, wire, gates) and tested for mo
 need to make a generalized format of taking and outputting multiple qubits at one time
 the attribute of target might be redundent(the structure of just a linked list might be enough), needs to be confirmed.
 might be good to switch to a model architecture instead of seperate data and logic
+
+24/10/2026 21:31 made multiple qubits input and output in one gate, working on entanglement representation
+24/10/2026 21:48 added delay system to manage time in the circuit
+24/10/2026 21:53 decided to have a globle combined probability matrix to handle entanglements in data layer, with a local representation in each of the elements
+24/10/2026 22:43 https://www.cl.cam.ac.uk/teaching/2324/QuantComp/Quantum_Computing_Lecture_5_2024.pdf?utm_source=chatgpt.com page 14 for gates on none adjacent qubits 
+24/10/2026 23:33 couldn't understand any of the permutation matrix construction.... doing specific Hadamard and CNOT gate embedding now, generalize later
+25/10/2026 00:42 finished implementing the method get_global_matrix()

@@ -1,6 +1,7 @@
 import elements
 import numpy as np
 
+"""
 ket_0 = np.array([[1], [0]])
 ket_1 = np.array([[0], [1]])
 
@@ -11,3 +12,11 @@ wire_1 = elements.Wire(sources=qubit_1)
 H_gate = elements.Hadamard(sources=wire_0).get_output()
 
 print(H_gate)
+"""
+
+swap_gate = np.array([[1, 0, 0, 0],
+                        [0, 0, 1, 0],
+                        [0, 1, 0, 0],
+                        [0, 0, 0, 1]])
+
+I = np.array([[1, 0], [0, 1]])
