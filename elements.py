@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from data import Data
+from data import Model
 import numpy as np
 
 @dataclass(frozen=True)
@@ -41,7 +41,7 @@ class Element:
         return self._target
     
     def set_sources(self, editor, new_sources):
-        if isinstance(editor, (Data, Element, Qubit)):
+        if isinstance(editor, (Model, Element, Qubit)):
             self._sources = new_sources
             if new_sources is not None and new_sources.get_target() is not self:
                 new_sources.set_target(editor = self, new_target=self)
@@ -50,7 +50,7 @@ class Element:
         self.refresh_qubits()
 
     def set_target(self, editor, new_target):
-        if isinstance(editor, (Data, Element)):
+        if isinstance(editor, (Model, Element)):
             self._target = new_target
             if new_target is not None and new_target.get_sources() is not self:
                 new_target.set_sources(editor = self, new_sources=self)
@@ -88,7 +88,7 @@ class Wire(Element):
         super().__init__(sources, target, delay)
 
     def set_delay(self, editor, new_delay):
-        if isinstance(editor, (Data, Wire)):
+        if isinstance(editor, (Model, Wire)):
             self._delay = new_delay
         else:
             raise ValueError("data in elements must be edited from data layer")
@@ -121,13 +121,13 @@ class Qubit():
         self.set_target(editor = self, new_target = target)
 
     def set_qubit_states(self, editor, new_states):
-        if type(editor) == Data or editor == self:
+        if type(editor) == Model or editor == self:
             self._qubit_states = new_states
         else:
             raise ValueError("data in elements must be edited from data layer")
 
     def set_target(self, editor, new_target):
-        if isinstance(editor, (Data, Qubit, Element)):
+        if isinstance(editor, (Model, Qubit, Element)):
             self._target = new_target
             if new_target is not None and new_target.get_sources() is not self:
                 new_target.set_sources(editor = self, new_sources = self)
@@ -187,8 +187,8 @@ class Gate(Element):
 
     def get_base_matrixes(self):
         """
-        returns the matrix composition of the gate in the form of 
-        M1 @ M2 @... +  M3 @ M4 @... + ..., 
+        This method returns the matrix composition of the gate in the form of 
+        M1 ⊗ M2 ⊗... +  M3 ⊗ M4 ⊗... + ..., 
         in the form of
         [[M1, M2, ...], [M3, M4, ...], ...]
         """

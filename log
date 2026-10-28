@@ -10,3 +10,5 @@ might be good to switch to a model architecture instead of seperate data and log
 24/10/2026 22:43 https://www.cl.cam.ac.uk/teaching/2324/QuantComp/Quantum_Computing_Lecture_5_2024.pdf?utm_source=chatgpt.com page 14 for gates on none adjacent qubits 
 24/10/2026 23:33 couldn't understand any of the permutation matrix construction.... doing specific Hadamard and CNOT gate embedding now, generalize later
 25/10/2026 00:42 finished implementing the method get_global_matrix()
+
+28/10/2026 12:46- 13:21 started working on GUI, implemented the buttons to add elements to circuit.
