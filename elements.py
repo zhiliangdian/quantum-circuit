@@ -1,8 +1,6 @@
-from dataclasses import dataclass
 import data
 import numpy as np
 
-@dataclass(frozen=True)
 class Element:
     """
     A base class for all elements in the quantum circuit.
@@ -27,6 +25,9 @@ class Element:
         """
         This is the constructor for the element class. It initializes the qubit states, sources, target, and delay of the element.
         """
+        self._sources = None
+        self._target = None
+        self._qubit_states = None
         self.set_sources(editor = self, new_sources=sources)
         self.set_target(editor = self, new_target=target)
         self._delay = delay
@@ -42,9 +43,14 @@ class Element:
     
     def set_sources(self, editor, new_sources):
         if isinstance(editor, (data.Model, Element, Qubit)):
+            if isinstance(self, Gate) and new_sources is not None:
+                if not isinstance(new_sources, (list, tuple)):
+                    new_sources = [new_sources]
             self._sources = new_sources
-            if new_sources is not None and new_sources.get_target() is not self:
-                new_sources.set_target(editor = self, new_target=self)
+            sources = new_sources if isinstance(new_sources, (list, tuple)) else [new_sources]
+            for source in sources:
+                if source is not None and source.get_target() is not self:
+                    source.set_target(editor=self, new_target=self)
         else:
             raise ValueError("data in elements must be edited from data layer")
         self.refresh_qubits()
@@ -52,7 +58,7 @@ class Element:
     def set_target(self, editor, new_target):
         if isinstance(editor, (data.Model, Element)):
             self._target = new_target
-            if new_target is not None and new_target.get_sources() is not self:
+            if new_target is not None and not new_target.has_source(self):
                 new_target.set_sources(editor = self, new_sources=self)
         else:
             raise ValueError("data in elements must be edited from data layer")
@@ -61,7 +67,17 @@ class Element:
         """
         This method refreshes the qubit states of the element.
         """
-        self._qubit_states = self.get_sources().get_qubit_states()
+        source = self.get_sources()
+        if source is None:
+            self._qubit_states = None
+            return
+        self._qubit_states = source.get_qubit_states()
+
+    def has_source(self, source):
+        sources = self.get_sources()
+        if isinstance(sources, (list, tuple)):
+            return any(item is source for item in sources)
+        return sources is source
 
     def get_total_delay(self):
         """
@@ -85,7 +101,29 @@ class Wire(Element):
     This class represents a wire in the quantum circuit, which connects two other elements.
     """
     def __init__(self, sources=None, target=None, delay=0):
+        self.source_port = 0
         super().__init__(sources, target, delay)
+
+    def get_initial_sources(self):
+        if self._sources is None:
+            return []
+        roots = self._sources.get_initial_sources()
+        return roots[self.source_port:self.source_port + 1]
+
+    def refresh_qubits(self):
+        super().refresh_qubits()
+        state = self._qubit_states
+        if state is None or np.size(state) <= 2:
+            return
+        # Prototype approximation: sum amplitudes over the other output ports.
+        # This deliberately discards entanglement; it is NOT a reduced state.
+        count = int(np.log2(np.size(state)))
+        rows = np.moveaxis(np.asarray(state).reshape([2] * count),
+                           self.source_port, 0).reshape(2, -1)
+        approximate = rows.sum(axis=1)
+        if np.linalg.norm(approximate) < 1e-12:
+            approximate = rows[:, np.argmax(np.linalg.norm(rows, axis=0))]
+        self._qubit_states = approximate / np.linalg.norm(approximate)
 
     def set_delay(self, editor, new_delay):
         if isinstance(editor, (data.Model, Wire)):
@@ -112,11 +150,13 @@ class Qubit():
     """
     This class represents a qubit sources in the quantum circuit.
     """
-    def __init__(self, qubit_state, target=None):
+    def __init__(self, qubit_state=None, target=None):
         """
         This is the constructor for the qubit class. It takes a single qubit state and an optional target element as input.
         It does not have a sources.
         """
+        if qubit_state is None:
+            qubit_state = np.array([1.0, 0.0])
         self.set_qubit_states(editor = self, new_states = qubit_state)
         self.set_target(editor = self, new_target = target)
 
@@ -129,7 +169,7 @@ class Qubit():
     def set_target(self, editor, new_target):
         if isinstance(editor, (data.Model, Qubit, Element)):
             self._target = new_target
-            if new_target is not None and new_target.get_sources() is not self:
+            if new_target is not None and not new_target.has_source(self):
                 new_target.set_sources(editor = self, new_sources = self)
         else:
             raise ValueError("data in elements must be edited from data layer")
@@ -152,15 +192,21 @@ class Gate(Element):
     This  is the parent class for all gates in the quantum circuit.
     """
     def __init__(self, sources=None, target=None, qubit_number=1):
-        super().__init__(sources=sources, target=target)
         self._qubit_number = qubit_number
+        self._output = None
+        super().__init__(sources=sources, target=target)
+
+    def refresh_qubits(self):
         self._output = self.transformation()
 
     def transformation(self):
         """
         This method applies the gate's transformation to the input qubit states and returns the output qubit states.
         """
-        return self.get_matrix() @ self.combine_entry()
+        state = self.combine_entry()
+        if state is None:
+            return None
+        return self.get_matrix() @ state
 
     def get_matrix(self):
         return self._matrix
@@ -172,8 +218,13 @@ class Gate(Element):
         """
         this method combines the input qubits states into a single state vector for the gate's transformation.
         """
-        combined_state = self.get_sources()[0].get_qubit_states()
-        for source in self.get_sources()[1:]:
+        sources = self.get_sources()
+        if sources is None or len(sources) != self._qubit_number:
+            return None
+        if any(source is None or source.get_qubit_states() is None for source in sources):
+            return None
+        combined_state = sources[0].get_qubit_states()
+        for source in sources[1:]:
             combined_state = np.kron(combined_state, source.get_qubit_states())
         return combined_state
 
@@ -182,7 +233,8 @@ class Gate(Element):
         This method returns the total delay at the gate, including the delay of its sources.
         """
         if self.get_sources() is not None:
-            return max(source.get_total_delay() for source in self.get_sources())
+            return max((source.get_total_delay() for source in self.get_sources()
+                        if source is not None), default=0)
         return 0
 
     def get_base_matrixes(self):
@@ -201,7 +253,8 @@ class Gate(Element):
         if self.get_sources() is not None:
             initial_sources = []
             for source in self.get_sources():
-                initial_sources.extend(source.get_initial_sources())
+                if source is not None:
+                    initial_sources.extend(source.get_initial_sources())
             return initial_sources
         return []
 
@@ -223,7 +276,6 @@ class Hadamard(Gate):
         for i in self.get_base_matrixes()[0]:
             self._matrix = np.kron(self._matrix, i)
         super().__init__(sources=sources, target=target, qubit_number=qubit_number)
-        print(self._qubit_number)
 
     def get_base_matrixes(self):
         return np.array([
@@ -278,10 +330,23 @@ class Measurement(Gate):
         This method applies the measurement to the input qubit states and returns the output classical bits.
         """
         qubit_states = self.combine_entry()
+        if qubit_states is None:
+            return None
         probabilities = np.abs(qubit_states)**2
         measured_state = np.random.choice(len(probabilities), p=probabilities)
         output_state = np.zeros_like(qubit_states)
         output_state[measured_state] = 1
         return output_state
 
-Hadamard()
+
+class X(Gate):
+    def __init__(self, sources=None, target=None):
+        self._matrix = np.array([[0, 1], [1, 0]])
+        super().__init__(sources, target)
+
+
+class Z(Gate):
+    def __init__(self, sources=None, target=None):
+        self._matrix = np.diag([1, -1])
+        super().__init__(sources, target)
+

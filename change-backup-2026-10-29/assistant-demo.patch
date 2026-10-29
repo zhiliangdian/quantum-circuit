@@ -1,0 +1,276 @@
+--- a/data.py
++++ b/data.py
+@@ -12,7 +12,7 @@
+                 self.initial_global_state = np.kron(self.initial_global_state, element.get_qubit_states())
+                 self.qubit_list.append(element)
+             self.delay_list.append(element.get_total_delay())
+-        self.combined_list = np.array(list(zip(self.element_list, self.delay_list)))
++        self.combined_list = np.array(list(zip(self.element_list, self.delay_list)), dtype=object).reshape(-1, 2)
+         self.combined_list = self.combined_list[self.combined_list[:, 1].argsort()]
+ 
+     def get_global_matrix(self, time):
+@@ -27,6 +27,8 @@
+         self.global_state = self.initial_global_state.copy()
+         for element in self.combined_list[self.combined_list[:, 1] <= time][:, 0]:
+             if isinstance(element, elements.Gate):
++                if element.combine_entry() is None:
++                    raise ValueError(f"{type(element).__name__} requires connected inputs before simulation")
+                 transformation_matrix_list = []
+                 
+                 for base_matrix in element.get_base_matrixes():
+@@ -46,7 +48,7 @@
+ 
+     def refresh(self):
+         """this method is used to refresh the data layer"""
+-        self.__init__()
++        self.__init__(self.element_list)
+ 
+     def add_element(self, element):
+         self.element_list.append(element)
+--- a/elements.py
++++ b/elements.py
+@@ -2,7 +2,6 @@
+ import data
+ import numpy as np
+ 
+-@dataclass(frozen=True)
+ class Element:
+     """
+     A base class for all elements in the quantum circuit.
+@@ -27,6 +26,9 @@
+         """
+         This is the constructor for the element class. It initializes the qubit states, sources, target, and delay of the element.
+         """
++        self._sources = None
++        self._target = None
++        self._qubit_states = None
+         self.set_sources(editor = self, new_sources=sources)
+         self.set_target(editor = self, new_target=target)
+         self._delay = delay
+@@ -42,9 +44,14 @@
+     
+     def set_sources(self, editor, new_sources):
+         if isinstance(editor, (data.Model, Element, Qubit)):
++            if isinstance(self, Gate) and new_sources is not None:
++                if not isinstance(new_sources, (list, tuple)):
++                    new_sources = [new_sources]
+             self._sources = new_sources
+-            if new_sources is not None and new_sources.get_target() is not self:
+-                new_sources.set_target(editor = self, new_target=self)
++            sources = new_sources if isinstance(new_sources, (list, tuple)) else [new_sources]
++            for source in sources:
++                if source is not None and source.get_target() is not self:
++                    source.set_target(editor=self, new_target=self)
+         else:
+             raise ValueError("data in elements must be edited from data layer")
+         self.refresh_qubits()
+@@ -52,7 +59,7 @@
+     def set_target(self, editor, new_target):
+         if isinstance(editor, (data.Model, Element)):
+             self._target = new_target
+-            if new_target is not None and new_target.get_sources() is not self:
++            if new_target is not None and not new_target.has_source(self):
+                 new_target.set_sources(editor = self, new_sources=self)
+         else:
+             raise ValueError("data in elements must be edited from data layer")
+@@ -61,7 +68,17 @@
+         """
+         This method refreshes the qubit states of the element.
+         """
+-        self._qubit_states = self.get_sources().get_qubit_states()
++        source = self.get_sources()
++        if source is None:
++            self._qubit_states = None
++            return
++        self._qubit_states = source.get_qubit_states()
++
++    def has_source(self, source):
++        sources = self.get_sources()
++        if isinstance(sources, (list, tuple)):
++            return any(item is source for item in sources)
++        return sources is source
+ 
+     def get_total_delay(self):
+         """
+@@ -112,11 +129,13 @@
+     """
+     This class represents a qubit sources in the quantum circuit.
+     """
+-    def __init__(self, qubit_state, target=None):
++    def __init__(self, qubit_state=None, target=None):
+         """
+         This is the constructor for the qubit class. It takes a single qubit state and an optional target element as input.
+         It does not have a sources.
+         """
++        if qubit_state is None:
++            qubit_state = np.array([1.0, 0.0])
+         self.set_qubit_states(editor = self, new_states = qubit_state)
+         self.set_target(editor = self, new_target = target)
+ 
+@@ -129,7 +148,7 @@
+     def set_target(self, editor, new_target):
+         if isinstance(editor, (data.Model, Qubit, Element)):
+             self._target = new_target
+-            if new_target is not None and new_target.get_sources() is not self:
++            if new_target is not None and not new_target.has_source(self):
+                 new_target.set_sources(editor = self, new_sources = self)
+         else:
+             raise ValueError("data in elements must be edited from data layer")
+@@ -152,15 +171,21 @@
+     This  is the parent class for all gates in the quantum circuit.
+     """
+     def __init__(self, sources=None, target=None, qubit_number=1):
++        self._qubit_number = qubit_number
++        self._output = None
+         super().__init__(sources=sources, target=target)
+-        self._qubit_number = qubit_number
++
++    def refresh_qubits(self):
+         self._output = self.transformation()
+ 
+     def transformation(self):
+         """
+         This method applies the gate's transformation to the input qubit states and returns the output qubit states.
+         """
+-        return self.get_matrix() @ self.combine_entry()
++        state = self.combine_entry()
++        if state is None:
++            return None
++        return self.get_matrix() @ state
+ 
+     def get_matrix(self):
+         return self._matrix
+@@ -172,8 +197,13 @@
+         """
+         this method combines the input qubits states into a single state vector for the gate's transformation.
+         """
+-        combined_state = self.get_sources()[0].get_qubit_states()
+-        for source in self.get_sources()[1:]:
++        sources = self.get_sources()
++        if sources is None or len(sources) != self._qubit_number:
++            return None
++        if any(source is None or source.get_qubit_states() is None for source in sources):
++            return None
++        combined_state = sources[0].get_qubit_states()
++        for source in sources[1:]:
+             combined_state = np.kron(combined_state, source.get_qubit_states())
+         return combined_state
+ 
+@@ -182,7 +212,8 @@
+         This method returns the total delay at the gate, including the delay of its sources.
+         """
+         if self.get_sources() is not None:
+-            return max(source.get_total_delay() for source in self.get_sources())
++            return max((source.get_total_delay() for source in self.get_sources()
++                        if source is not None), default=0)
+         return 0
+ 
+     def get_base_matrixes(self):
+@@ -201,7 +232,8 @@
+         if self.get_sources() is not None:
+             initial_sources = []
+             for source in self.get_sources():
+-                initial_sources.extend(source.get_initial_sources())
++                if source is not None:
++                    initial_sources.extend(source.get_initial_sources())
+             return initial_sources
+         return []
+ 
+@@ -223,7 +255,6 @@
+         for i in self.get_base_matrixes()[0]:
+             self._matrix = np.kron(self._matrix, i)
+         super().__init__(sources=sources, target=target, qubit_number=qubit_number)
+-        print(self._qubit_number)
+ 
+     def get_base_matrixes(self):
+         return np.array([
+@@ -278,10 +309,11 @@
+         This method applies the measurement to the input qubit states and returns the output classical bits.
+         """
+         qubit_states = self.combine_entry()
++        if qubit_states is None:
++            return None
+         probabilities = np.abs(qubit_states)**2
+         measured_state = np.random.choice(len(probabilities), p=probabilities)
+         output_state = np.zeros_like(qubit_states)
+         output_state[measured_state] = 1
+         return output_state
+ 
+-Hadamard()
+--- a/gui.py
++++ b/gui.py
+@@ -2,10 +2,12 @@
+ from matplotlib.widgets import Button
+ from matplotlib.patches import Rectangle, Circle
+ import elements
++from data import Model
+ from matplotlib.backend_bases import MouseButton
+ 
+ layout = {
+-    elements.Qubit: {"position": (0, 0), "output_position": (1, 0.5)},
++    elements.Wire: {"input_positions": [(0.1, 0.5)], "output_positions": [(0.9, 0.5)]},
++    elements.Qubit: {"position": (0, 0), "output_positions": [(1, 0.5)]},
+     elements.Hadamard: {"input_positions": [(0, 0.5)], "output_positions": [(1, 0.5)]},
+     elements.CNOT: {"input_positions": [(0, 0.3), (0, 0.7)], "output_positions": [(1, 0.3), (1, 0.7)]}
+ }
+@@ -18,6 +20,7 @@
+         - initializing the dictionary that map elements to their graphical data
+         """
+         self._graphical_data = {}
++        self.model = Model([])
+ 
+         #set the canvas in three sections, one for the circuit, one for the buttons and one for the information display
+         self._main_figure = plt.figure(figsize=(10, 10))
+@@ -33,10 +36,10 @@
+         self._add_Hadamard = Button(button_axes[2], "Hadamard")
+         self._add_CNOT = Button(button_axes[3], "CNOT")
+ 
+-        self._add_wire.on_clicked(self.add_element(elements.Wire()))
+-        self._add_qubit.on_clicked(self.add_element(elements.Qubit()))
+-        self._add_Hadamard.on_clicked(self.add_element(elements.Hadamard()))
+-        self._add_CNOT.on_clicked(self.add_element(elements.CNOT()))
++        self._add_wire.on_clicked(lambda event: self.add_element(elements.Wire()))
++        self._add_qubit.on_clicked(lambda event: self.add_element(elements.Qubit()))
++        self._add_Hadamard.on_clicked(lambda event: self.add_element(elements.Hadamard()))
++        self._add_CNOT.on_clicked(lambda event: self.add_element(elements.CNOT()))
+ 
+         plt.show()
+ 
+@@ -59,6 +62,9 @@
+                 raise ValueError("Unknown element type")
+ 
+         self.model.add_element(element)
++        visual = DraggableElement(element, self._circuit_figure)
++        self._graphical_data[element]["visual"] = visual
++        self._main_figure.canvas.draw_idle()
+         return None
+     
+     def remove_element(self):
+@@ -91,8 +97,12 @@
+ 
+         self.figure = figure
+         self.axes = figure.add_axes([0.4, 0.4, 0.2, 0.2])
+-        self.rectangle = Rectangle((0.1, 0.1), width = 0.8, height = 0.8)
++        self.axes.set(xlim=(-0.1, 1.1), ylim=(-0.1, 1.1))
++        self.axes.set_axis_off()
++        self.rectangle = Rectangle((0.1, 0.1), width = 0.8, height = 0.8,
++                                   facecolor="skyblue", edgecolor="black")
+         self.axes.add_patch(self.rectangle)
++        self.axes.text(0.5, 0.5, type(element).__name__, ha="center", va="center")
+         self.canvas = self.axes.figure.canvas
+         self._connections = [
+             self.canvas.mpl_connect("button_press_event", self.on_press),
+@@ -149,11 +159,5 @@
+             canvas.widgetlock.release(self)
+         self._press = None
+ 
+-figure, axes = plt.subplots()
+-axes.set(xlim=(0, 10), ylim=(0, 10), aspect="equal",
+-            title="Click and drag the rectangle")
+-# Keep a reference: Matplotlib stores weak references to event handlers.
+-draggable = DraggableElement(elements.Hadamard(), axes)
+-plt.show()
+-
+-GUI()
++if __name__ == "__main__":
++    GUI()

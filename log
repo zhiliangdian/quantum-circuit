@@ -12,3 +12,4 @@ might be good to switch to a model architecture instead of seperate data and log
 25/10/2026 00:42 finished implementing the method get_global_matrix()
 
 28/10/2026 12:46- 13:21 started working on GUI, implemented the buttons to add elements to circuit.
+28/10/2026 23:00 - 1:00 implemented half of the gui section and found some bugs, yet to fix. vibe coded a demo, waiting to be rolled back and work on again.
