@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from data import Model
+import data
 import numpy as np
 
 @dataclass(frozen=True)
@@ -41,7 +41,7 @@ class Element:
         return self._target
     
     def set_sources(self, editor, new_sources):
-        if isinstance(editor, (Model, Element, Qubit)):
+        if isinstance(editor, (data.Model, Element, Qubit)):
             self._sources = new_sources
             if new_sources is not None and new_sources.get_target() is not self:
                 new_sources.set_target(editor = self, new_target=self)
@@ -50,7 +50,7 @@ class Element:
         self.refresh_qubits()
 
     def set_target(self, editor, new_target):
-        if isinstance(editor, (Model, Element)):
+        if isinstance(editor, (data.Model, Element)):
             self._target = new_target
             if new_target is not None and new_target.get_sources() is not self:
                 new_target.set_sources(editor = self, new_sources=self)
@@ -88,7 +88,7 @@ class Wire(Element):
         super().__init__(sources, target, delay)
 
     def set_delay(self, editor, new_delay):
-        if isinstance(editor, (Model, Wire)):
+        if isinstance(editor, (data.Model, Wire)):
             self._delay = new_delay
         else:
             raise ValueError("data in elements must be edited from data layer")
@@ -121,13 +121,13 @@ class Qubit():
         self.set_target(editor = self, new_target = target)
 
     def set_qubit_states(self, editor, new_states):
-        if type(editor) == Model or editor == self:
+        if type(editor) == data.Model or editor == self:
             self._qubit_states = new_states
         else:
             raise ValueError("data in elements must be edited from data layer")
 
     def set_target(self, editor, new_target):
-        if isinstance(editor, (Model, Qubit, Element)):
+        if isinstance(editor, (data.Model, Qubit, Element)):
             self._target = new_target
             if new_target is not None and new_target.get_sources() is not self:
                 new_target.set_sources(editor = self, new_sources = self)
@@ -217,10 +217,13 @@ class Hadamard(Gate):
     it transforms |0> to |+> and |1> to |->.
     """
     def __init__(self, sources=None, target=None, qubit_number = 1):
+        self._qubit_number = qubit_number #this line is here to prevent circular defining
+        
         self._matrix = np.eye(1)
         for i in self.get_base_matrixes()[0]:
             self._matrix = np.kron(self._matrix, i)
         super().__init__(sources=sources, target=target, qubit_number=qubit_number)
+        print(self._qubit_number)
 
     def get_base_matrixes(self):
         return np.array([
@@ -280,3 +283,5 @@ class Measurement(Gate):
         output_state = np.zeros_like(qubit_states)
         output_state[measured_state] = 1
         return output_state
+
+Hadamard()

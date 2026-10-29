@@ -1,5 +1,6 @@
-import elements
+
 import numpy as np
+import data
 
 """
 ket_0 = np.array([[1], [0]])
@@ -20,3 +21,4 @@ swap_gate = np.array([[1, 0, 0, 0],
                         [0, 0, 0, 1]])
 
 I = np.array([[1, 0], [0, 1]])
+
