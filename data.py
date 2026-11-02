@@ -2,8 +2,8 @@ import elements
 import numpy as np
 
 class Model:
-    def __init__(self, element_list):
-        self.element_list = element_list
+    def __init__(self, element_list=None):
+        self.element_list = list(element_list) if element_list is not None else []
         self.initial_global_state = np.array([1])
         self.delay_list = []
         self.qubit_list = []
@@ -12,8 +12,7 @@ class Model:
                 self.initial_global_state = np.kron(self.initial_global_state, element.get_qubit_states())
                 self.qubit_list.append(element)
             self.delay_list.append(element.get_total_delay())
-        self.combined_list = np.array(list(zip(self.element_list, self.delay_list)))
-        self.combined_list = self.combined_list[self.combined_list[:, 1].argsort()]
+
 
     def get_global_matrix(self, time):
         """
@@ -46,7 +45,10 @@ class Model:
 
     def refresh(self):
         """this method is used to refresh the data layer"""
-        self.__init__()
+        self.__init__(self.element_list)
+        self.combined_list = np.array(list(zip(self.element_list, self.delay_list)), dtype=object).reshape(-1, 2)
+        #sort the combined list based on delay time
+        self.combined_list = self.combined_list[np.argsort(self.combined_list[:, 1])]
 
     def add_element(self, element):
         self.element_list.append(element)

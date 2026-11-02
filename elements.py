@@ -2,7 +2,7 @@ from dataclasses import dataclass
 import data
 import numpy as np
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class Element:
     """
     A base class for all elements in the quantum circuit.
@@ -61,7 +61,11 @@ class Element:
         """
         This method refreshes the qubit states of the element.
         """
-        self._qubit_states = self.get_sources().get_qubit_states()
+        sources = self.get_sources()
+        if sources is not None:
+            self._qubit_states = self.get_sources().get_qubit_states()
+        else:
+            self._qubit_states = None
 
     def get_total_delay(self):
         """
@@ -112,7 +116,7 @@ class Qubit():
     """
     This class represents a qubit sources in the quantum circuit.
     """
-    def __init__(self, qubit_state, target=None):
+    def __init__(self, qubit_state = np.array([[1], [0]]), target=None):
         """
         This is the constructor for the qubit class. It takes a single qubit state and an optional target element as input.
         It does not have a sources.
@@ -154,7 +158,7 @@ class Gate(Element):
     def __init__(self, sources=None, target=None, qubit_number=1):
         super().__init__(sources=sources, target=target)
         self._qubit_number = qubit_number
-        self._output = self.transformation()
+        self._output = None
 
     def transformation(self):
         """
@@ -172,9 +176,10 @@ class Gate(Element):
         """
         this method combines the input qubits states into a single state vector for the gate's transformation.
         """
-        combined_state = self.get_sources()[0].get_qubit_states()
-        for source in self.get_sources()[1:]:
-            combined_state = np.kron(combined_state, source.get_qubit_states())
+        combined_state = np.eye(self._qubit_number * 2)
+        if self.get_sources() is not None:
+            for source in self.get_sources():
+                combined_state = np.kron(combined_state, source.get_qubit_states())
         return combined_state
 
     def get_total_delay(self):
@@ -204,6 +209,13 @@ class Gate(Element):
                 initial_sources.extend(source.get_initial_sources())
             return initial_sources
         return []
+
+    def refresh_qubits(self):
+        """
+        This method refreshes the qubit states of the gate.
+        """
+        super().refresh_qubits()
+        self._output = self.transformation()
 
 
 class Hadamard(Gate):
@@ -245,6 +257,8 @@ class CNOT(Gate):
     it flips the target qubit if the control qubit is |1>.
     """
     def __init__(self, sources=None, target=None, qubit_number = 2):
+        self._qubit_number = qubit_number #this line is here to prevent circular defining
+        
         self._matrix = np.array([[1, 0, 0, 0],
                                   [0, 1, 0, 0],
                                   [0, 0, 0, 1],
@@ -283,5 +297,3 @@ class Measurement(Gate):
         output_state = np.zeros_like(qubit_states)
         output_state[measured_state] = 1
         return output_state
-
-Hadamard()
