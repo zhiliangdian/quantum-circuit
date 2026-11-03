@@ -7,6 +7,7 @@ class Element:
     """
     A base class for all elements in the quantum circuit.
     This includes wires, qubits, and gates.
+    Each connection slot is None or (other_element, other_port_index).
     Methods:
         get_qubit_states(): Returns the qubit states of the element.
         get_sources(): Returns the sources of the element.
@@ -31,8 +32,8 @@ class Element:
         self.set_target(editor = self, new_target=target)
         self._delay = delay
 
-    def get_qubit_states(self):
-        return self._qubit_states
+    # def get_qubit_states(self):
+        # return self._qubit_states
 
     def get_sources(self):
         return self._sources
@@ -40,48 +41,52 @@ class Element:
     def get_target(self):
         return self._target
     
-    def set_sources(self, editor, new_sources):
+    def set_sources(self, editor, new_sources, index=None):
+        """Set the input list, or one input slot when index is supplied."""
         if isinstance(editor, (data.Model, Element, Qubit)):
-            self._sources = new_sources
-            if new_sources is not None and new_sources.get_target() is not self:
-                new_sources.set_target(editor = self, new_target=self)
+            if index is not None:
+                self._sources[index] = new_sources
+            else:
+                self._sources = (list(new_sources) if isinstance(new_sources, list)
+                                 else [new_sources] * getattr(self, "_qubit_number", 1))
         else:
             raise ValueError("data in elements must be edited from data layer")
-        self.refresh_qubits()
 
-    def set_target(self, editor, new_target):
+    def set_target(self, editor, new_target, index=None):
+        """Set the output list, or one output slot when index is supplied."""
         if isinstance(editor, (data.Model, Element)):
-            self._target = new_target
-            if new_target is not None and new_target.get_sources() is not self:
-                new_target.set_sources(editor = self, new_sources=self)
+            if index is not None:
+                self._target[index] = new_target
+            else:
+                self._target = (list(new_target) if isinstance(new_target, list)
+                                else [new_target] * getattr(self, "_qubit_number", 1))
         else:
             raise ValueError("data in elements must be edited from data layer")
 
-    def refresh_qubits(self):
-        """
-        This method refreshes the qubit states of the element.
-        """
-        sources = self.get_sources()
-        if sources is not None:
-            self._qubit_states = self.get_sources().get_qubit_states()
-        else:
-            self._qubit_states = None
+    # def refresh_qubits(self):
+        # """
+        # This method refreshes the qubit states of the element.
+        # """
+        # sources = self.get_sources()
+        # if sources is not None:
+            # self._qubit_states = [source.get_qubit_states() for source in sources if source is not None]
+        # else:
+            # self._qubit_states = None
 
     def get_total_delay(self):
-        """
-        This method returns the total delay at the element.
-        """
-        if self.get_sources() is not None:
-            return self.get_sources().get_total_delay() + self._delay
-        return self._delay
+        return max((connection[0].get_total_delay()
+                    for connection in self.get_sources() if connection is not None),
+                   default=0) + self._delay
 
-    def get_initial_sources(self):
-        """
-        Return a flat list of initial qubits in input order.
-        """
-        if self.get_sources() is not None:
-            return self.get_sources().get_initial_sources()
-        return []
+    def get_initial_sources(self, index=None):
+        """Trace each output through its matching input; preserve empty slots."""
+        if index is not None:
+            connection = self.get_sources()[index]
+            if connection is None:
+                return [None]
+            source, source_index = connection
+            return source.get_initial_sources(source_index)
+        return [self.get_initial_sources(i)[0] for i in range(len(self.get_sources()))]
 
 
 class Wire(Element):
@@ -104,12 +109,7 @@ class Wire(Element):
         return self._delay
 
     def get_total_delay(self):
-        """
-        This method returns the total delay at the wire, including the delay of its sources.
-        """
-        if self.get_sources() is not None:
-            return self.get_sources().get_total_delay() + self._delay
-        return self._delay
+        return super().get_total_delay()
 
 
 class Qubit():
@@ -130,11 +130,13 @@ class Qubit():
         else:
             raise ValueError("data in elements must be edited from data layer")
 
-    def set_target(self, editor, new_target):
+    def set_target(self, editor, new_target, index=None):
+        """Set the output list, or one output slot when index is supplied."""
         if isinstance(editor, (data.Model, Qubit, Element)):
-            self._target = new_target
-            if new_target is not None and new_target.get_sources() is not self:
-                new_target.set_sources(editor = self, new_sources = self)
+            if index is not None:
+                self._target[index] = new_target
+            else:
+                self._target = list(new_target) if isinstance(new_target, list) else [new_target]
         else:
             raise ValueError("data in elements must be edited from data layer")
 
@@ -147,7 +149,9 @@ class Qubit():
     def get_total_delay(self):
         return 0
 
-    def get_initial_sources(self):
+    def get_initial_sources(self, index=None):
+        if index not in (None, 0):
+            raise IndexError("a qubit has only output port 0")
         return [self]
 
 
@@ -156,39 +160,34 @@ class Gate(Element):
     This  is the parent class for all gates in the quantum circuit.
     """
     def __init__(self, sources=None, target=None, qubit_number=1):
-        super().__init__(sources=sources, target=target)
         self._qubit_number = qubit_number
-        self._output = None
+        super().__init__(sources=sources, target=target)
+        # self._output = None
 
-    def transformation(self):
-        """
-        This method applies the gate's transformation to the input qubit states and returns the output qubit states.
-        """
-        return self.get_matrix() @ self.combine_entry()
+    # def transformation(self):
+        # """
+        # This method applies the gate's transformation to the input qubit states and returns the output qubit states.
+        # """
+        # return self.get_matrix() @ self.combine_entry()
 
     def get_matrix(self):
         return self._matrix
 
-    def get_qubit_states(self):
-        return self._output
+    # def get_qubit_states(self):
+        # return self._output
 
-    def combine_entry(self):
-        """
-        this method combines the input qubits states into a single state vector for the gate's transformation.
-        """
-        combined_state = np.eye(self._qubit_number * 2)
-        if self.get_sources() is not None:
-            for source in self.get_sources():
-                combined_state = np.kron(combined_state, source.get_qubit_states())
-        return combined_state
+    # def combine_entry(self):
+        # """
+        # this method combines the input qubits states into a single state vector for the gate's transformation.
+        # """
+        # combined_state = np.eye(self._qubit_number * 2)
+        # if self.get_sources() is not None:
+            # for source in self.get_sources():
+                # combined_state = np.kron(combined_state, source.get_qubit_states())
+        # return combined_state
 
     def get_total_delay(self):
-        """
-        This method returns the total delay at the gate, including the delay of its sources.
-        """
-        if self.get_sources() is not None:
-            return max(source.get_total_delay() for source in self.get_sources())
-        return 0
+        return super().get_total_delay()
 
     def get_base_matrixes(self):
         """
@@ -199,23 +198,15 @@ class Gate(Element):
         """
         pass
 
-    def get_initial_sources(self):
-        """
-        Return a flat list of initial qubits in input order.
-        """
-        if self.get_sources() is not None:
-            initial_sources = []
-            for source in self.get_sources():
-                initial_sources.extend(source.get_initial_sources())
-            return initial_sources
-        return []
+    def get_initial_sources(self, index=None):
+        return super().get_initial_sources(index)
 
-    def refresh_qubits(self):
-        """
-        This method refreshes the qubit states of the gate.
-        """
-        super().refresh_qubits()
-        self._output = self.transformation()
+    # def refresh_qubits(self):
+        # """
+        # This method refreshes the qubit states of the gate.
+        # """
+        # super().refresh_qubits()
+        # self._output = self.transformation()
 
 
 class Hadamard(Gate):
@@ -287,13 +278,13 @@ class Measurement(Gate):
         self._matrix = np.eye(2**qubit_number)
         super().__init__(sources=sources, target=target, qubit_number=qubit_number)
 
-    def transformation(self):
-        """
-        This method applies the measurement to the input qubit states and returns the output classical bits.
-        """
-        qubit_states = self.combine_entry()
-        probabilities = np.abs(qubit_states)**2
-        measured_state = np.random.choice(len(probabilities), p=probabilities)
-        output_state = np.zeros_like(qubit_states)
-        output_state[measured_state] = 1
-        return output_state
+    # def transformation(self):
+        # """
+        # This method applies the measurement to the input qubit states and returns the output classical bits.
+        # """
+        # qubit_states = self.combine_entry()
+        # probabilities = np.abs(qubit_states)**2
+        # measured_state = np.random.choice(len(probabilities), p=probabilities)
+        # output_state = np.zeros_like(qubit_states)
+        # output_state[measured_state] = 1
+        # return output_state

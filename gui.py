@@ -9,15 +9,21 @@ class WireInput():
     """
     this is a placeholder for identifying the input of a wire.
     """
-    def __init__(self):
-        pass
+    def __init__(self, wire):
+        self.wire = wire
+
+    def set_source(self, source):
+        self.wire.set_source(source)
 
 class WireOutput():
     """
     this is a placeholder for identifying the output of a wire.
     """
-    def __init__(self):
-        pass
+    def __init__(self, wire):
+        self.wire = wire
+
+    def set_target(self, target):
+        self.wire.set_target(target)
 
 layout = {
     WireInput: {"input_positions": [(0.4, 0.4)]},
@@ -64,7 +70,7 @@ class GUI:
         match type(element):
             case elements.Wire:
                 self._graphical_data[element] = {"start_position": (0, 0), "end_position": (1, 0)}
-                self._graphical_data[element]["draggablepointers"] = DraggableWire(element, self._circuit_figure) 
+                self._graphical_data[element]["draggablepointers"] = DraggableWire(element, self._circuit_figure, model = self.model) 
                 self.model.add_element(element)
                 self._main_figure.canvas.draw_idle()
                 return
@@ -82,33 +88,17 @@ class GUI:
                 raise ValueError("Unknown element type")
 
         self.model.add_element(element)
-        self._graphical_data[element]["draggable"] = DraggableElement(element, self._circuit_figure)
+        self._graphical_data[element]["draggable"] = DraggableElement(element, self._circuit_figure, model = self.model)
         self._main_figure.canvas.draw_idle()
     
     def remove_element(self):
         pass
-
-    def connect_element(self):
-        pass
-
-    def disconnect_element(self):
-        pass
-
-    def edit_element(self):
-        pass
-
-    def display_information(self):
-        pass
-
-    def get_data(self):
-        pass
-
-    def handle_user_operation(self):
-        pass
+    
 
 
 class DraggableElement:
-    def __init__(self, element, figure, size=(0.1, 0.1), position=(0.4, 0.4), port_size=0.07):
+    def __init__(self, element, figure, size=(0.1, 0.1), position=(0.4, 0.4), port_size=0.07, model= None):
+        self.model = model
         self.element = element
         self.layout = layout[type(element)]
         self._press = None
@@ -132,18 +122,20 @@ class DraggableElement:
         self.textbox = self.axes.text(0.5, 0.5, type(element).__name__, ha='center', va='center', fontsize=12)
 
         if "input_positions" in self.layout:
-            self.input_port = [Circle(pos, radius = port_size) for pos in self.layout["input_positions"]]
+            self.input_port = [Circle(pos, radius = port_size, gid = "input") for pos in self.layout["input_positions"]]
             for port in self.input_port:
                 port.set_facecolor("black")
-            for port in self.input_port:
                 self.axes.add_patch(port)
+                port.owner = self
+                port.connected = False
 
         if "output_positions" in self.layout:
-            self.output_port = [Circle(pos, radius = port_size) for pos in self.layout["output_positions"]]
+            self.output_port = [Circle(pos, radius = port_size, gid = "output" ) for pos in self.layout["output_positions"]]
             for port in self.output_port:
                 port.set_facecolor("black")
-            for port in self.output_port:
                 self.axes.add_patch(port)
+                port.owner = self
+                port.connected = False
 
     def on_press(self, event):
         if event.button != MouseButton.LEFT or event.inaxes is not self.axes:
@@ -176,6 +168,50 @@ class DraggableElement:
         self._press = None
         self.axes.figure.canvas.widgetlock.release(self)
 
+        #disconnect all ports
+        if hasattr(self, "input_port"):
+            self.model.disconnect_source(self.get_element(), refresh=False)
+        if hasattr(self, "output_port"):
+            self.model.disconnect_target(self.get_element(), refresh=False)
+
+        #set the connection between elements
+        #if statement pyramid :(
+        for ports in getattr(self, "input_port", []):
+            for other_ports in self.figure.findobj(match = Circle):
+                if other_ports is not ports and ports.get_extents().overlaps(other_ports.get_extents()):
+                    if other_ports.get_gid() == "output":
+                        source = other_ports.owner.get_element()
+                        target = self.get_element()
+                        if source is target:
+                            continue
+                        self.model.connect_elements(source, target, other_ports.owner.output_port.index(other_ports), self.input_port.index(ports), refresh=False)
+                        ports.connected = True
+                        other_ports.connected = True
+
+        for ports in getattr(self, "output_port", []):
+            for other_ports in self.figure.findobj(match = Circle):
+                if other_ports is not ports and ports.get_extents().overlaps(other_ports.get_extents()):
+                    if other_ports.get_gid() == "input":
+                        source = self.get_element()
+                        target = other_ports.owner.get_element()
+                        if source is target:
+                            continue
+                        self.model.connect_elements(source, target, self.output_port.index(ports), other_ports.owner.input_port.index(other_ports), refresh=False)
+                        ports.connected = True
+                        other_ports.connected = True
+
+        self.model.refresh()
+        # Derive visual flags from the final connections, including old partners.
+        for port in self.figure.findobj(match=Circle):
+            owner = getattr(port, "owner", None)
+            if owner is None:
+                continue
+            element = owner.get_element()
+            if port.get_gid() == "input":
+                port.connected = element.get_sources()[owner.input_port.index(port)] is not None
+            elif port.get_gid() == "output":
+                port.connected = element.get_target()[owner.output_port.index(port)] is not None
+
     def disconnect(self):
         canvas = self.axes.figure.canvas
         for connection in self._connections:
@@ -190,14 +226,25 @@ class DraggableElement:
         """
         self.textbox.set_text(text)
 
+    def get_element(self):
+        """
+        this method returns the element associated with this draggable element.
+        """
+        if type(self.element) in [WireInput, WireOutput]:
+            return self.element.wire
+        return self.element
+
+
+
 class DraggableWire():
-    def __init__(self, wire, figure):
+    def __init__(self, wire, figure, model = None):
         self.wire = wire
         self.figure = figure
+        self.model = model
         input_pos = [0.35, 0.5]
         output_pos = [0.6, 0.5]
-        self.input_point = DraggableElement(WireInput(), figure, size = [0.01, 0.01], position = input_pos, port_size = 0.5)
-        self.output_point = DraggableElement(WireOutput(), figure, size = [0.01, 0.01], position = output_pos, port_size = 0.5)
+        self.input_point = DraggableElement(WireInput(wire), figure, size = [0.01, 0.01], position = input_pos, port_size = 0.5, model = model)
+        self.output_point = DraggableElement(WireOutput(wire), figure, size = [0.01, 0.01], position = output_pos, port_size = 0.5, model = model)
         self.output_point.rectangle.set_visible(False)
         self.input_point.rectangle.set_visible(False)
         self.input_point.set_text("In")
