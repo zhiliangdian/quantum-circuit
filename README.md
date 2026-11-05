@@ -6,12 +6,12 @@ The project aims to provide an interactive interface for constructing quantum ci
 
 ## Current Features
 
-Interactive circuit editor built with Matplotlib.
-Draggable circuit elements and automatic connection detection.
-Support for Hadamard and CNOT gates.
-Configurable initial qubit states.
-State-vector simulation using NumPy.
-Calculation and display of the global quantum state at different stages of a circuit.
+- Interactive circuit editor built with Matplotlib.
+- Draggable circuit elements and automatic connection detection.
+- Support for Hadamard and CNOT gates.
+- Configurable initial qubit states.
+- State-vector simulation using NumPy.
+- Calculation and display of the global quantum state at different stages of a circuit.
 
 ## Implementation
 
@@ -35,11 +35,11 @@ This project is still under active development. Several features, including quan
 
 Possible future improvements include:
 
-Support X Z Y Measurement gates
-Support classical logic operation
-Make Hadamard gates extensiable
-Rename variables and functions to make it more readable (I hate my ability to name things)
-Optimization
-Usage of density matrixes to replace the current amplitudes vectors
+- Support X Z Y Measurement gates
+- Support classical logic operation
+- Make Hadamard gates extensiable
+- Rename variables and functions to make it more readable (I hate my ability to name things)
+- Optimization
+- Usage of density matrixes to replace the current amplitudes vectors
 
 The next milestone would be to able to construct a quantum teleportation demo.
