@@ -18,3 +18,5 @@ might be good to switch to a model architecture instead of seperate data and log
 2/11/2026 01:08 - 01:57 implemented draggable wire
 3/11/2026 20:35 implemented element connection
 3/11/2026 21:17 implemented element disconnection and data calculation, next to implement data display and user input
+
+5/11/2026 01:28 finished implementing user input and information display, the first prototype is ready(mostly)
