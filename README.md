@@ -40,5 +40,6 @@ Support classical logic operation
 Make Hadamard gates extensiable
 Rename variables and functions to make it more readable (I hate my ability to name things)
 Optimization
+Usage of density matrixes to replace the current amplitudes vectors
 
 The next milestone would be to able to construct a quantum teleportation demo.
